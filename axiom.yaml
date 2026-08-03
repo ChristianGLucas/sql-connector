@@ -1,5 +1,5 @@
 name: christiangeorgelucas/sql-connector
-version: 0.1.2
+version: 0.1.3
 language: go
 description: >-
   Generic SQL execution template for PostgreSQL and MySQL — the STATE pillar
@@ -20,7 +20,7 @@ nodes:
       input: QueryRequest
       output: QueryResponse
       kind: generic
-      generic_ports: [input, output]
+      generic_ports: [input]
       description: >-
         GENERIC TEMPLATE — bind to a real database via an Instance before
         use (`axiom instance create --generic-package
@@ -36,7 +36,7 @@ nodes:
       input: ExecuteRequest
       output: ExecuteResponse
       kind: generic
-      generic_ports: [input, output]
+      generic_ports: [input]
       description: >-
         GENERIC TEMPLATE — bind to a real database via an Instance before
         use; not directly invocable. Runs a single parameterized INSERT/
@@ -50,7 +50,7 @@ nodes:
       input: ExecuteTransactionRequest
       output: ExecuteTransactionResponse
       kind: generic
-      generic_ports: [input, output]
+      generic_ports: [input]
       description: >-
         GENERIC TEMPLATE — bind to a real database via an Instance before
         use; not directly invocable. Runs multiple parameterized statements
@@ -66,7 +66,7 @@ nodes:
       input: PingRequest
       output: PingResponse
       kind: generic
-      generic_ports: [input, output]
+      generic_ports: [input]
       description: >-
         GENERIC TEMPLATE — bind to a real database via an Instance before
         use; not directly invocable. Checks connectivity to a PostgreSQL or
@@ -78,7 +78,7 @@ nodes:
       input: ListTablesRequest
       output: ListTablesResponse
       kind: generic
-      generic_ports: [input, output]
+      generic_ports: [input]
       description: >-
         GENERIC TEMPLATE — bind to a real database via an Instance before
         use; not directly invocable. Lists tables and views visible to the
@@ -89,7 +89,7 @@ nodes:
       input: DescribeTableRequest
       output: DescribeTableResponse
       kind: generic
-      generic_ports: [input, output]
+      generic_ports: [input]
       description: >-
         GENERIC TEMPLATE — bind to a real database via an Instance before
         use; not directly invocable. Describes one table's columns — name,
@@ -102,7 +102,7 @@ nodes:
       output: QueryRowFrame
       type: pipeline
       kind: generic
-      generic_ports: [input, output]
+      generic_ports: [input]
       description: >-
         GENERIC TEMPLATE — bind to a real database via an Instance before
         use; not directly invocable. Runs a parameterized SELECT and
