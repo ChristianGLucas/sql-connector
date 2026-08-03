@@ -58,9 +58,14 @@ func engineForDSN(dsn string) (driverName, engine string, err error) {
 }
 
 // resolveDSN implements ConnectionConfig's two-way precedence: a named
-// secret (recommended, for any real credential) wins over the raw `dsn`
-// field (publicly-documented/throwaway credentials only) when both are set;
-// leaving both empty is a structured error.
+// secret wins over the raw `dsn` field when both are set; leaving both
+// empty is a structured error. NOTE (2026-08-03): dsn_secret_name is not
+// currently deliverable — this package declares no required_secrets (any
+// caller can name any secret of their own; there is no single fixed name
+// to declare), and the platform only forwards a secret whose name is
+// declared. ax.Secrets().Get(name) reliably returns not-found regardless
+// of whether that secret is actually configured. `dsn` is the only
+// currently-working path; see ConnectionConfig's doc comment.
 func resolveDSN(ax axiom.Context, cfg *gen.ConnectionConfig) (string, error) {
 	name := strings.TrimSpace(cfg.GetDsnSecretName())
 	if name != "" {

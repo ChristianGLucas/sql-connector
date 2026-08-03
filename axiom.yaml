@@ -3,9 +3,11 @@ version: 0.1.0
 language: go
 description: >-
   Generic SQL execution against live PostgreSQL and MySQL databases via a
-  bring-your-own DSN — a named tenant secret (recommended for any real
-  credential) or a raw DSN field (publicly-documented/throwaway credentials
-  only) — the STATE pillar for agents that query and write their own databases.
+  bring-your-own DSN — a raw DSN field (publicly-documented/throwaway
+  credentials; the only currently-working connection path — see
+  ConnectionConfig's doc) or a named tenant secret (the intended design for
+  real credentials, not yet deliverable pending a platform secret-grants
+  model) — the STATE pillar for agents that query and write their own databases.
   Parameterized query/execute/transaction/introspection nodes (unary) plus a
   true streaming row-cursor node (pipeline) for unbounded result sets. Boundary:
   this package EXECUTES against live databases; it does not parse or transpile

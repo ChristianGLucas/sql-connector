@@ -82,20 +82,24 @@ sign-up at **[axiomide.com](https://axiomide.com)**.
 
 ## Connecting to your database
 
-Every node takes a `connection` with two ways to supply the DSN — set exactly
-one:
+Every node takes a `connection` with two ways to supply the DSN:
 
-- **`connection.dsn_secret_name`** (recommended for any real credential). Set
-  a tenant secret under **Console → Secrets** holding your full connection
-  string, then reference its NAME (never the value). Resolved server-side at
-  invocation time, mirroring http-tools' `auth_secret_name` convention — this
-  keeps real credentials out of flow manifests, logs, and node inputs
-  entirely.
-- **`connection.dsn`** — a raw DSN, for publicly-documented or throwaway
-  credentials only (e.g. a published read-only public database). A value
-  placed here is visible in flow definitions and execution history — do
-  **not** put a real credential in this field. When both are set, the secret
-  wins.
+- **`connection.dsn`** — **the working path today.** A raw DSN. A value
+  placed here is visible in flow definitions and execution history, so use
+  it for publicly-documented or throwaway credentials only (e.g. a published
+  read-only public database) — never a real credential.
+- **`connection.dsn_secret_name`** — **not yet deliverable.** The intended
+  design: name a tenant secret (Console → Secrets) holding your full
+  connection string, resolved server-side at invocation time so a real
+  credential never appears in a flow manifest, log, or node input. This
+  field is present in the schema and the design is sound, but the current
+  platform only delivers a secret to a node whose name is declared in that
+  node's `required_secrets` — and this package deliberately declares none
+  (the whole point of this field is letting any caller name any secret of
+  their own, not one fixed name the package author picks). Until a
+  secret-grants model closes that gap, a secret named here will not
+  resolve — use `dsn` instead. When it does become deliverable, the secret
+  will take precedence over `dsn` if both are set.
 
 The DSN's scheme selects the engine either way:
 
