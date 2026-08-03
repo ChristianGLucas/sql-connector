@@ -1,0 +1,400 @@
+// This file defines the data contracts (messages) for your Axiom package.
+// Every node's --input and --output refers to a message defined here.
+//
+// Run `axiom create message <Name>` to scaffold a new message below.
+// Run `axiom generate` to compile these definitions into language bindings in gen/.
+//
+// DOCUMENTATION
+//   Comments written directly above a message or field declaration are extracted
+//   automatically at publish time and shown in the Axiom registry as documentation.
+//   Write your descriptions there — no separate doc files needed.
+//
+//   Leading comment  (no blank line before the declaration) → registry description ✓
+//   Detached comment (blank line before the declaration)    → ignored by registry  ✗
+//
+// This file is yours to edit. Axiom only appends new message blocks — it never
+// overwrites or removes content you have written.
+
+syntax = "proto3";
+
+package christiangeorgelucas.sql_connector;
+
+option go_package = ".;gen";
+
+// How to reach the target database. The connector NEVER accepts a raw DSN
+// string field — credentials only ever travel as a named tenant secret,
+// resolved server-side at invocation time (mirrors http-tools' auth_secret_name
+// convention). The DSN's URL scheme selects the engine: "postgres://" or
+// "postgresql://" for PostgreSQL (via the pgx driver), "mysql://" for MySQL
+// (via go-sql-driver/mysql). Any other scheme is a structured error.
+message ConnectionConfig {
+  // Name of the tenant secret holding the full connection DSN, e.g.
+  // "postgres://user:pass@host:5432/dbname" or
+  // "mysql://user:pass@host:3306/dbname". Resolved via ax.Secrets().Get() at
+  // invocation time — the DSN value itself never appears in this message, in
+  // any log, or in the flow manifest. Required; a missing or unconfigured
+  // secret name is a structured error, not a crash.
+  string dsn_secret_name = 1;
+}
+
+// How to interpret a parameter's string value when binding it to a
+// placeholder. Explicit typing (rather than driver type-sniffing) is what
+// lets a single string-typed wire value bind correctly to an integer column,
+// a boolean column, a timestamp column, etc. across both engines.
+enum ParamType {
+  // Unspecified defaults to PARAM_TYPE_STRING (bound as text).
+  PARAM_TYPE_UNSPECIFIED = 0;
+  // Bind `value` as-is (text/varchar/char columns, or any column the engine
+  // can implicitly cast text into).
+  PARAM_TYPE_STRING = 1;
+  // Parse `value` as a base-10 integer (int2/int4/int8, TINYINT..BIGINT).
+  PARAM_TYPE_INT = 2;
+  // Parse `value` as a base-10 floating point number
+  // (real/double precision/numeric, FLOAT/DOUBLE/DECIMAL).
+  PARAM_TYPE_FLOAT = 3;
+  // Parse `value` as "true"/"false" (case-insensitive) for boolean columns.
+  PARAM_TYPE_BOOL = 4;
+  // Bind SQL NULL regardless of `value` (which is ignored and should be left
+  // empty). This is the only way to pass a NULL parameter — there is no
+  // separate is_null flag on Param; the type IS the null signal.
+  PARAM_TYPE_NULL = 5;
+  // Parse `value` as an RFC 3339 timestamp (e.g. "2024-01-15T09:30:00Z") for
+  // timestamp/timestamptz/datetime columns.
+  PARAM_TYPE_TIMESTAMP = 6;
+  // Decode `value` as standard base64 for bytea/BLOB/VARBINARY columns.
+  PARAM_TYPE_BYTES = 7;
+}
+
+// One positional parameter bound to a placeholder in a parameterized
+// statement. Params bind POSITIONALLY, in array order, to the SQL text's
+// engine-native placeholders — this connector never parses or rewrites SQL
+// text (that is sql-tools' domain), so the placeholder style must already
+// match the target engine: "$1, $2, ..." for postgres, "?" for mysql.
+message Param {
+  // How to interpret `value` below. Required — PARAM_TYPE_UNSPECIFIED is
+  // treated as PARAM_TYPE_STRING, but naming the real type is strongly
+  // recommended so numeric/boolean/timestamp columns bind correctly.
+  ParamType type = 1;
+  // The parameter's value, always carried as a string regardless of its
+  // logical type (see `type` for how it is parsed/converted before binding).
+  // Ignored when type is PARAM_TYPE_NULL.
+  string value = 2;
+}
+
+// One result column's identity and native database type.
+message Column {
+  // Column name as returned by the query (aliased name, if any).
+  string name = 1;
+  // The database engine's native type name for this column (e.g. "int4",
+  // "varchar", "timestamptz" for postgres; "INT", "VARCHAR", "DATETIME" for
+  // mysql) — exactly what the driver reports, not a normalized/shared enum.
+  string db_type = 2;
+}
+
+// One cell's value. A message wrapper (rather than a bare scalar field) is
+// required here to distinguish SQL NULL from a legitimate zero-value
+// (empty string, "0", "false"): proto3 scalar fields cannot tell "unset" apart
+// from their zero value, so `is_null` is the ONLY authoritative signal —
+// never infer NULL from `value` being empty.
+message Value {
+  // String representation of the cell's value (e.g. "42", "true",
+  // "2024-01-15T09:30:00Z", or base64 text for binary columns). Always ""
+  // when is_null is true. NOTE: a boolean column renders as "true"/"false"
+  // on PostgreSQL (a real boolean type) but "0"/"1" on MySQL, which has no
+  // native boolean type — TINYINT(1) is indistinguishable from a real
+  // small-integer column, so this connector renders MySQL's actual native
+  // value rather than guessing at boolean intent.
+  string value = 1;
+  // True when the underlying database value is SQL NULL. When true, `value`
+  // is always "" and MUST be ignored as data — an empty string is not the
+  // same thing as NULL.
+  bool is_null = 2;
+}
+
+// One result row: values positionally aligned with QueryResponse.columns
+// (values[i] corresponds to columns[i]).
+message Row {
+  repeated Value values = 1;
+}
+
+// A parameterized SELECT to run and return in full (see StreamQueryRowsRequest
+// for the unbounded/streaming equivalent). This node does not police the SQL
+// verb: an INSERT/UPDATE/DELETE without RETURNING also runs successfully
+// (the write takes effect on both engines) and yields a zero-column,
+// zero-row QueryResponse — a legal but unhelpful way to invoke a write; use
+// Execute or ExecuteTransaction for writes instead.
+message QueryRequest {
+  // Target database connection.
+  ConnectionConfig connection = 1;
+  // The SELECT statement to run, using the target engine's native
+  // placeholder syntax ($1,$2,... for postgres; ? for mysql) for every
+  // caller-supplied value. String-interpolating values into this SQL text
+  // instead of using `params` is unsafe and unsupported by design.
+  string sql = 2;
+  // Positional parameters bound to the placeholders in `sql`, in order.
+  repeated Param params = 3;
+  // Caps the number of rows returned; 0 means "no cap" (return every row the
+  // query produces). This is purely a RESULT-SHAPE choice for the caller's
+  // convenience (e.g. "just show me a sample") — it is not a DoS control;
+  // Axiom's own request/response size limits already bound worst-case
+  // payload size. When the query would have produced more rows than
+  // max_rows, `truncated` is set true on the response and only the first
+  // max_rows rows are returned.
+  int32 max_rows = 4;
+}
+
+// The result of a Query call: full column metadata plus every returned row
+// (subject to max_rows).
+message QueryResponse {
+  // Column metadata, in result order.
+  repeated Column columns = 1;
+  // Result rows, in the order the database returned them.
+  repeated Row rows = 2;
+  // Total number of rows included in `rows` (i.e. len(rows) — provided so
+  // callers don't need to count the repeated field themselves).
+  int64 row_count = 3;
+  // True when the query produced more rows than max_rows and the result was
+  // capped; false when every produced row is present in `rows`.
+  bool truncated = 4;
+}
+
+// A parameterized INSERT/UPDATE/DELETE/DDL statement to execute once. This
+// node does not police the SQL verb: a SELECT also runs successfully here,
+// reporting rows_affected as the number of rows the SELECT matched — a
+// legal but useless way to invoke a SELECT, since the matched rows'
+// data is never returned. Use Query to actually read data.
+//
+// IDEMPOTENCY HAZARD: Axiom invokes nodes at-least-once — a transport
+// timeout/retry can cause this node to run again for the same logical
+// execution, which means the SAME Execute call can hit the database MORE
+// THAN ONCE. This node does not — and cannot — de-duplicate for you. Prefer
+// naturally idempotent statements (INSERT ... ON CONFLICT DO NOTHING /
+// ON DUPLICATE KEY UPDATE, UPDATE ... WHERE state != desired_state, a
+// unique-key upsert) or derive your own idempotency key from the caller's
+// execution identity and de-duplicate downstream. A plain
+// "INSERT INTO orders (...) VALUES (...)" with no unique constraint WILL
+// double-insert on a retried delivery.
+message ExecuteRequest {
+  // Target database connection.
+  ConnectionConfig connection = 1;
+  // The statement to execute, using the target engine's native placeholder
+  // syntax for every caller-supplied value. String-interpolating values into
+  // this SQL text instead of using `params` is unsafe and unsupported.
+  string sql = 2;
+  // Positional parameters bound to the placeholders in `sql`, in order.
+  repeated Param params = 3;
+}
+
+// The result of an Execute call.
+message ExecuteResponse {
+  // Number of rows the statement inserted/updated/deleted, as reported by
+  // the driver. For DDL statements this is typically 0.
+  int64 rows_affected = 1;
+  // The auto-generated ID of the last inserted row, when the engine and
+  // driver support reporting it (MySQL AUTO_INCREMENT columns via
+  // LAST_INSERT_ID()). Meaningless — always 0 — when
+  // last_insert_id_supported is false; check that field, not this one, to
+  // decide whether to trust it.
+  int64 last_insert_id = 2;
+  // True only when the engine/driver actually reports a last-insert ID for
+  // this statement (MySQL). Always false for PostgreSQL, which has no
+  // equivalent driver-level API (use "INSERT ... RETURNING id" via Query
+  // instead) — this flag exists so a legitimate last_insert_id of 0 is never
+  // confused with "not supported".
+  bool last_insert_id_supported = 3;
+}
+
+// One statement within an ExecuteTransaction call.
+message Statement {
+  // The statement to execute, using the target engine's native placeholder
+  // syntax for every caller-supplied value.
+  string sql = 1;
+  // Positional parameters bound to the placeholders in `sql`, in order.
+  repeated Param params = 2;
+}
+
+// Run multiple parameterized statements as ONE all-or-nothing transaction on
+// a SINGLE connection. This is the atomicity story for CRUD backends WITHIN
+// one database — there is no cross-NODE transaction: if you need atomicity
+// across two separate Execute node invocations (e.g. in different flow
+// steps), it does not exist on this platform, and you must express the
+// whole unit of work as one ExecuteTransaction call instead.
+//
+// IDEMPOTENCY HAZARD: the same at-least-once delivery risk as Execute
+// applies here, to the WHOLE transaction — a retried delivery re-runs every
+// statement again. Prefer naturally idempotent statements throughout.
+message ExecuteTransactionRequest {
+  // Target database connection. All statements run on one connection inside
+  // one transaction.
+  ConnectionConfig connection = 1;
+  // Statements to execute in order, inside a single transaction. If any
+  // statement fails, every statement (including earlier ones in this same
+  // call) is rolled back — nothing is partially applied.
+  repeated Statement statements = 2;
+}
+
+// One statement's outcome within a committed transaction. Only meaningful
+// when ExecuteTransactionResponse.committed is true.
+message StatementResult {
+  // Rows affected by this statement, as reported by the driver.
+  int64 rows_affected = 1;
+  // Last-insert ID for this statement, when supported (see
+  // ExecuteResponse.last_insert_id).
+  int64 last_insert_id = 2;
+  // True only when the engine/driver reports a last-insert ID for this
+  // statement (see ExecuteResponse.last_insert_id_supported).
+  bool last_insert_id_supported = 3;
+}
+
+// The result of an ExecuteTransaction call.
+message ExecuteTransactionResponse {
+  // True when every statement succeeded and the transaction was committed.
+  // False means the whole transaction was rolled back — nothing was applied,
+  // regardless of how many statements ran successfully before the failure.
+  bool committed = 1;
+  // Per-statement results, in the same order as the request's `statements`.
+  // Only populated when committed is true; empty when the transaction was
+  // rolled back.
+  repeated StatementResult results = 2;
+  // 0-based index into the request's `statements` of the statement that
+  // caused the rollback. -1 when committed is true (no failure occurred) —
+  // -1 rather than 0 because 0 is itself a valid statement index and must
+  // not be confused with "no failure".
+  int32 failed_statement_index = 3;
+  // The database error message for the failing statement. Empty when
+  // committed is true.
+  string error = 4;
+}
+
+// Check connectivity to a database and read back its version.
+message PingRequest {
+  // Target database connection.
+  ConnectionConfig connection = 1;
+}
+
+// The result of a successful Ping. An unreachable host, auth failure, or
+// timeout is returned as a structured node error instead of a response with
+// empty/zero fields — a caller can rely on getting THIS message back only on
+// genuine success.
+message PingResponse {
+  // Engine identified from the DSN scheme: "postgres" or "mysql".
+  string engine = 1;
+  // The server's self-reported version string (e.g. "PostgreSQL 16.2 on
+  // x86_64-pc-linux-gnu, ...", or MySQL's "8.0.36").
+  string server_version = 2;
+  // Round-trip time of the connect + version query, in milliseconds.
+  int64 latency_ms = 3;
+}
+
+// List tables (and views) visible to the connection, via information_schema
+// so the same request shape works on both engines.
+message ListTablesRequest {
+  // Target database connection.
+  ConnectionConfig connection = 1;
+  // Schema (postgres) / database (mysql) to list tables from. Empty uses the
+  // engine's natural default: "public" for postgres, the DSN's target
+  // database for mysql.
+  string schema = 2;
+}
+
+// One table or view visible to the connection.
+message TableInfo {
+  // Schema (postgres) / database (mysql) the table belongs to.
+  string schema = 1;
+  // Table (or view) name.
+  string name = 2;
+  // "BASE TABLE" or "VIEW", exactly as information_schema.tables reports it.
+  string table_type = 3;
+}
+
+// The result of a ListTables call.
+message ListTablesResponse {
+  // Every table/view found, ordered by name.
+  repeated TableInfo tables = 1;
+}
+
+// Describe one table's columns — schema-qualified so an agent can write a
+// correct query against it without guessing types or nullability.
+message DescribeTableRequest {
+  // Target database connection.
+  ConnectionConfig connection = 1;
+  // Schema (postgres) / database (mysql) the table belongs to. Empty uses
+  // the engine's natural default (see ListTablesRequest.schema).
+  string schema = 2;
+  // Table name to describe. Required.
+  string table = 3;
+}
+
+// One column's definition within a described table.
+message ColumnInfo {
+  // Column name.
+  string name = 1;
+  // The database engine's native type name (e.g. "character varying",
+  // "integer" for postgres; "varchar", "int" for mysql), exactly as
+  // information_schema.columns reports it.
+  string db_type = 2;
+  // True if the column accepts NULL.
+  bool nullable = 3;
+  // True if the column is part of the table's primary key.
+  bool primary_key = 4;
+  // The column's default-value expression as SQL text (e.g. "now()",
+  // "'active'::character varying"), exactly as information_schema.columns
+  // reports it. Ignore this field's value unless has_default is true — a
+  // column with no default reports "" here, which is indistinguishable from
+  // a default that happens to BE the empty string without has_default.
+  string default_value = 5;
+  // True when the column has a default-value expression at all. See
+  // default_value.
+  bool has_default = 6;
+  // 1-based position of this column within the table.
+  int32 ordinal_position = 7;
+}
+
+// The result of a DescribeTable call.
+message DescribeTableResponse {
+  // Schema the described table belongs to (echoes the resolved schema, even
+  // when the request left it empty).
+  string schema = 1;
+  // Table name (echoes the request).
+  string table = 2;
+  // Every column, ordered by ordinal_position.
+  repeated ColumnInfo columns = 3;
+}
+
+// A parameterized SELECT to stream row-by-row rather than materialize in
+// full — the unbounded-result-set answer, and this package's flagship
+// pipeline node. Uses real server-side cursor/rows iteration; the full
+// result set is never held in memory at once, so this is the right choice
+// for tables too large to return as one QueryResponse.
+message StreamQueryRowsRequest {
+  // Target database connection.
+  ConnectionConfig connection = 1;
+  // The SELECT statement to run, using the target engine's native
+  // placeholder syntax ($1,$2,... for postgres; ? for mysql).
+  string sql = 2;
+  // Positional parameters bound to the placeholders in `sql`, in order.
+  repeated Param params = 3;
+}
+
+// One frame of a StreamQueryRows response: exactly one result row, plus its
+// position and (on every frame, not just the first) the column metadata
+// needed to interpret it — sent on every frame rather than only the first so
+// a consumer joining or processing frames independently never has to
+// remember or correlate metadata from an earlier frame.
+message QueryRowFrame {
+  // Column metadata, in result order. Repeated on every frame (see message
+  // comment for why).
+  repeated Column columns = 1;
+  // This frame's row.
+  Row row = 2;
+  // 0-based index of this row within the overall result set.
+  int64 row_index = 3;
+  // Business-level terminal marker: true ONLY on the last frame emitted
+  // (which still carries a real row — there is no separate empty final
+  // frame). The platform's own transport-level terminal frame is empty and
+  // invisible to consumers reading frame payloads, so this field is the only
+  // reliable end-of-stream signal. A zero-row result emits NO frames at all
+  // (there is no row to carry is_final=true), which is itself the "no rows"
+  // signal — do not wait for a final frame that never arrives.
+  bool is_final = 4;
+}

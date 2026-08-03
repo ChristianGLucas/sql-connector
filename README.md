@@ -1,0 +1,135 @@
+# sql-connector
+
+Generic SQL execution against live **PostgreSQL** and **MySQL** databases via a
+bring-your-own connection string — the STATE pillar for agents that need to
+query and write their own databases. Parameterized query/execute/transaction/
+introspection nodes (unary, for typical request/response use) plus a true
+streaming row-cursor node (pipeline, for unbounded result sets). Built for the
+[Axiom](https://axiomide.com) marketplace, MIT licensed.
+
+**Boundary:** this package *executes* against live databases. It does not
+parse or transpile SQL text — see
+[`christiangeorgelucas/sql-tools`](https://github.com/ChristianGLucas/sql-tools)
+for that.
+
+## Use it from your agent or app
+
+Every node in this package is a **live, auto-scaling API endpoint** on the
+[Axiom](https://axiomide.com) marketplace — call it from an AI agent or your
+own code, with nothing to self-host.
+
+**📦 See it on the marketplace:**
+https://dev.axiomide.com/marketplace/christiangeorgelucas/sql-connector@0.1.0
+
+**Hook it up to an AI agent (MCP).** Add Axiom's hosted MCP server to any MCP
+client and every node becomes a typed tool your agent can call — search the
+catalog, inspect a schema, and invoke it directly.
+
+```bash
+# Claude Code
+claude mcp add --transport http axiom https://api.axiomide.com/mcp \
+  --header "Authorization: Bearer $AXIOM_API_KEY"
+```
+
+Claude Desktop, Cursor, or any config-based client:
+
+```json
+{
+  "mcpServers": {
+    "axiom": {
+      "type": "http",
+      "url": "https://api.axiomide.com/mcp",
+      "headers": { "Authorization": "Bearer YOUR_AXIOM_API_KEY" }
+    }
+  }
+}
+```
+
+**Call it from the CLI.**
+
+```bash
+axiom invoke christiangeorgelucas/sql-connector/Query --input '{"connection":{"dsnSecretName":"MY_DB_DSN"},"sql":"SELECT id, name FROM users WHERE id = $1","params":[{"type":"PARAM_TYPE_INT","value":"42"}],"maxRows":100}'
+```
+
+**Call it over HTTP.**
+
+```bash
+curl -X POST https://api.axiomide.com/invocations/v1/nodes/christiangeorgelucas/sql-connector/0.1.0/Query \
+  -H "Authorization: Bearer $AXIOM_API_KEY" \
+  -H 'Content-Type: application/json' \
+  -d '{"connection":{"dsnSecretName":"MY_DB_DSN"},"sql":"SELECT id, name FROM users WHERE id = $1","params":[{"type":"PARAM_TYPE_INT","value":"42"}],"maxRows":100}'
+```
+
+### Get started free
+
+Install the CLI:
+
+```bash
+# macOS / Linux — Homebrew
+brew install axiomide/tap/axiom
+
+# macOS / Linux — install script
+curl -fsSL https://raw.githubusercontent.com/AxiomIDE/axiom-releases/main/install.sh | sh
+```
+
+**Windows:** download the `windows/amd64` `.zip` from the
+[releases page](https://github.com/AxiomIDE/axiom-releases/releases), unzip
+it, and put `axiom.exe` on your `PATH`.
+
+Then `axiom version` to verify, `axiom login` (GitHub or Google) to
+authenticate, and create an API key under **Console → API Keys**. Docs and
+sign-up at **[axiomide.com](https://axiomide.com)**.
+
+## Connecting to your database
+
+Set a tenant secret under **Console → Secrets** holding your full connection
+string, then reference its NAME (never the value) via
+`connection.dsn_secret_name` on every node. The DSN's scheme selects the
+engine:
+
+- `postgres://user:pass@host:5432/dbname` or `postgresql://...` → PostgreSQL
+  (via [pgx](https://github.com/jackc/pgx))
+- `mysql://user:pass@host:3306/dbname` → MySQL
+  (via [go-mysql-org/go-mysql](https://github.com/go-mysql-org/go-mysql))
+
+The raw DSN is never accepted as a plain input field — only as a named secret,
+resolved server-side at invocation time, mirroring http-tools'
+`auth_secret_name` convention. This keeps credentials out of flow manifests,
+logs, and node inputs entirely.
+
+## Nodes
+
+**Unary** (request/response — most agent queries):
+
+- **Query** — parameterized SELECT → columns, rows (NULL explicitly
+  distinguished from a zero-value via an `is_null` flag on every cell),
+  row_count, and a `truncated` flag when `max_rows` capped the result.
+- **Execute** — parameterized INSERT/UPDATE/DELETE/DDL → rows_affected +
+  last_insert_id where the engine supports it (MySQL only).
+- **ExecuteTransaction** — multiple parameterized statements, all-or-nothing,
+  on one connection. Full rollback + the failing statement's index and error
+  on any failure.
+- **Ping** — connectivity check + server version, with a bounded timeout so
+  an unreachable host fails fast instead of hanging.
+- **ListTables** / **DescribeTable** — schema-qualified introspection via
+  `information_schema`, working identically on both engines.
+
+**Pipeline** (streaming — unbounded result sets):
+
+- **StreamQueryRows** — parameterized SELECT streamed one row per frame using
+  a real server-side cursor. The full result set is never materialized in
+  memory, making this the right choice for tables too large to return from
+  `Query`.
+
+Parameterization is mandatory everywhere: every value binds through the
+target engine's native placeholder syntax (`$1, $2, ...` for PostgreSQL, `?`
+for MySQL) via the driver's own parameter binding — this connector never
+string-interpolates a value into SQL text.
+
+## Idempotency
+
+Axiom invokes nodes **at-least-once**. A retried delivery can re-execute
+`Execute` or `ExecuteTransaction` more than once for the same logical
+execution. Prefer naturally idempotent statements (`INSERT ... ON CONFLICT
+DO NOTHING`, `ON DUPLICATE KEY UPDATE`, a unique-key upsert) or derive your
+own idempotency key and de-duplicate downstream.

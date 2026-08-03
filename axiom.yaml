@@ -1,0 +1,81 @@
+name: christiangeorgelucas/sql-connector
+version: 0.1.0
+language: go
+description: >-
+  Generic SQL execution against live PostgreSQL and MySQL databases via a
+  bring-your-own DSN (stored as a tenant secret, never a raw field) — the
+  STATE pillar for agents that query and write their own databases.
+  Parameterized query/execute/transaction/introspection nodes (unary) plus a
+  true streaming row-cursor node (pipeline) for unbounded result sets. Boundary:
+  this package EXECUTES against live databases; it does not parse or transpile
+  SQL text — see christiangeorgelucas/sql-tools for that.
+nodes:
+    - name: Query
+      input: QueryRequest
+      output: QueryResponse
+      description: >-
+        Run a parameterized SELECT against PostgreSQL or MySQL and return the
+        full result: column metadata, every row (values as strings with an
+        explicit is_null flag distinguishing SQL NULL from a legitimate empty
+        string), a row_count, and a truncated flag when max_rows capped the
+        result. Use StreamQueryRows instead when the result set may be large —
+        Query materializes the whole result in memory before returning.
+    - name: Execute
+      input: ExecuteRequest
+      output: ExecuteResponse
+      description: >-
+        Run a single parameterized INSERT/UPDATE/DELETE/DDL statement against
+        PostgreSQL or MySQL and return rows_affected plus, when the engine
+        supports it, the last-inserted auto-increment ID. At-least-once node
+        invocation means a retried delivery can re-execute this statement —
+        prefer idempotent statements (upserts, unique-key conflict handling)
+        or de-duplicate downstream; see the field docs for detail.
+    - name: ExecuteTransaction
+      input: ExecuteTransactionRequest
+      output: ExecuteTransactionResponse
+      description: >-
+        Run multiple parameterized statements as one all-or-nothing
+        transaction on a single connection — the atomicity story for
+        multi-statement CRUD within one database. There is no cross-node
+        transaction on this platform: if you need atomicity across separate
+        node invocations, express the whole unit of work as one
+        ExecuteTransaction call instead. On any statement failure the entire
+        transaction rolls back and the response reports the failing
+        statement's index and error. Same at-least-once idempotency hazard as
+        Execute, applied to the whole transaction.
+    - name: Ping
+      input: PingRequest
+      output: PingResponse
+      description: >-
+        Check connectivity to a PostgreSQL or MySQL database and read back its
+        engine and version string. Returns a structured error (never a
+        response with zero-valued fields) on an unreachable host, auth
+        failure, or timeout, within a bounded connect timeout — it never
+        hangs indefinitely.
+    - name: ListTables
+      input: ListTablesRequest
+      output: ListTablesResponse
+      description: >-
+        List tables and views visible to the connection via
+        information_schema, so the same request shape works identically on
+        PostgreSQL and MySQL. Lets an agent discover what it can query before
+        writing SQL against it.
+    - name: DescribeTable
+      input: DescribeTableRequest
+      output: DescribeTableResponse
+      description: >-
+        Describe one table's columns — name, native database type,
+        nullability, primary-key membership, default value, and ordinal
+        position — via information_schema, schema-qualified so an agent can
+        write a correct query without guessing types.
+    - name: StreamQueryRows
+      input: StreamQueryRowsRequest
+      output: QueryRowFrame
+      type: pipeline
+      description: >-
+        Run a parameterized SELECT and stream results one row per frame using
+        a real server-side cursor — the full result set is never materialized
+        in memory, making this the right choice for tables too large to
+        return from Query. Each frame carries column metadata, one row, its
+        0-based row_index, and is_final (true only on the last frame emitted;
+        a zero-row result emits no frames at all).
