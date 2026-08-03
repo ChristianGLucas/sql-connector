@@ -1,114 +1,25 @@
 # sql-connector
 
-Generic SQL execution against live **PostgreSQL** and **MySQL** databases via a
-bring-your-own connection string — the STATE pillar for agents that need to
-query and write their own databases. Parameterized query/execute/transaction/
-introspection nodes (unary, for typical request/response use) plus a true
-streaming row-cursor node (pipeline, for unbounded result sets). Built for the
+Generic SQL execution template for **PostgreSQL** and **MySQL** — the STATE
+pillar for agents that need to query and write databases. Built for the
 [Axiom](https://axiomide.com) marketplace, MIT licensed.
+
+**This package is not directly invocable.** Each node here is a
+[Generic node](https://axiomide.com) (`kind: generic`) — a published,
+deployed template whose connection is intentionally unbound. A consumer
+binds one to a real database as a reusable **Instance** (one per
+database/credential, via `axiom instance create`), and it's the *Instance*
+that becomes the callable, addressable node: its own callers supply only the
+query-shaped fields (`sql`, `params`, etc.) — never a connection string. See
+[Creating your own database Instance](#creating-your-own-database-instance)
+below.
 
 **Boundary:** this package *executes* against live databases. It does not
 parse or transpile SQL text — see
 [`christiangeorgelucas/sql-tools`](https://github.com/ChristianGLucas/sql-tools)
 for that.
 
-## Use it from your agent or app
-
-Every node in this package is a **live, auto-scaling API endpoint** on the
-[Axiom](https://axiomide.com) marketplace — call it from an AI agent or your
-own code, with nothing to self-host.
-
-**📦 See it on the marketplace:**
-https://dev.axiomide.com/marketplace/christiangeorgelucas/sql-connector@0.1.0
-
-**Hook it up to an AI agent (MCP).** Add Axiom's hosted MCP server to any MCP
-client and every node becomes a typed tool your agent can call — search the
-catalog, inspect a schema, and invoke it directly.
-
-```bash
-# Claude Code
-claude mcp add --transport http axiom https://api.axiomide.com/mcp \
-  --header "Authorization: Bearer $AXIOM_API_KEY"
-```
-
-Claude Desktop, Cursor, or any config-based client:
-
-```json
-{
-  "mcpServers": {
-    "axiom": {
-      "type": "http",
-      "url": "https://api.axiomide.com/mcp",
-      "headers": { "Authorization": "Bearer YOUR_AXIOM_API_KEY" }
-    }
-  }
-}
-```
-
-**Call it from the CLI.**
-
-```bash
-axiom invoke christiangeorgelucas/sql-connector/Query --input '{"connection":{"dsnSecretName":"MY_DB_DSN"},"sql":"SELECT id, name FROM users WHERE id = $1","params":[{"type":"PARAM_TYPE_INT","value":"42"}],"maxRows":100}'
-```
-
-**Call it over HTTP.**
-
-```bash
-curl -X POST https://api.axiomide.com/invocations/v1/nodes/christiangeorgelucas/sql-connector/0.1.0/Query \
-  -H "Authorization: Bearer $AXIOM_API_KEY" \
-  -H 'Content-Type: application/json' \
-  -d '{"connection":{"dsnSecretName":"MY_DB_DSN"},"sql":"SELECT id, name FROM users WHERE id = $1","params":[{"type":"PARAM_TYPE_INT","value":"42"}],"maxRows":100}'
-```
-
-### Get started free
-
-Install the CLI:
-
-```bash
-# macOS / Linux — Homebrew
-brew install axiomide/tap/axiom
-
-# macOS / Linux — install script
-curl -fsSL https://raw.githubusercontent.com/AxiomIDE/axiom-releases/main/install.sh | sh
-```
-
-**Windows:** download the `windows/amd64` `.zip` from the
-[releases page](https://github.com/AxiomIDE/axiom-releases/releases), unzip
-it, and put `axiom.exe` on your `PATH`.
-
-Then `axiom version` to verify, `axiom login` (GitHub or Google) to
-authenticate, and create an API key under **Console → API Keys**. Docs and
-sign-up at **[axiomide.com](https://axiomide.com)**.
-
-## Connecting to your database
-
-Every node takes a `connection` with two ways to supply the DSN:
-
-- **`connection.dsn`** — **the working path today.** A raw DSN. A value
-  placed here is visible in flow definitions and execution history, so use
-  it for publicly-documented or throwaway credentials only (e.g. a published
-  read-only public database) — never a real credential.
-- **`connection.dsn_secret_name`** — **not yet deliverable.** The intended
-  design: name a tenant secret (Console → Secrets) holding your full
-  connection string, resolved server-side at invocation time so a real
-  credential never appears in a flow manifest, log, or node input. This
-  field is present in the schema and the design is sound, but the current
-  platform only delivers a secret to a node whose name is declared in that
-  node's `required_secrets` — and this package deliberately declares none
-  (the whole point of this field is letting any caller name any secret of
-  their own, not one fixed name the package author picks). Until a
-  secret-grants model closes that gap, a secret named here will not
-  resolve — use `dsn` instead. When it does become deliverable, the secret
-  will take precedence over `dsn` if both are set.
-
-The DSN's scheme selects the engine either way:
-
-- `postgres://user:pass@host:5432/dbname` or `postgresql://...` → PostgreSQL
-  (via [pgx](https://github.com/jackc/pgx))
-- `mysql://user:pass@host:3306/dbname` → MySQL
-  (via [go-mysql-org/go-mysql](https://github.com/go-mysql-org/go-mysql))
-
-## Nodes
+## Nodes (generic templates)
 
 **Unary** (request/response — most agent queries):
 
@@ -140,6 +51,67 @@ Parameterization is mandatory everywhere: every value binds through the
 target engine's native placeholder syntax (`$1, $2, ...` for PostgreSQL, `?`
 for MySQL) via the driver's own parameter binding — this connector never
 string-interpolates a value into SQL text.
+
+## Creating your own database Instance
+
+Bind any node above to a real database with `axiom instance create`. Pin the
+DSN as a literal config constant for a **public, non-sensitive** database:
+
+```bash
+axiom instance create \
+  --generic-package christiangeorgelucas/sql-connector \
+  --generic-node Query \
+  --generic-version 0.1.1 \
+  --description "Query my-app's production database (read-only)" \
+  --input-field sql=string \
+  --input-field params={kind:message,repeated:true,message:christiangeorgelucas/sql-connector.Param} \
+  --input-field max_rows=int32 \
+  --map connection.dsn="'postgres://reader:PASSWORD@host:5432/mydb'"
+```
+
+Or, for a **private** database, declare a secret name on the Instance and
+pin `connection.dsn_secret_name` to that same name — then set the secret's
+actual value once, under **Console → Secrets**:
+
+```bash
+axiom instance create \
+  --generic-package christiangeorgelucas/sql-connector \
+  --generic-node Query \
+  --generic-version 0.1.1 \
+  --description "Query my private production database" \
+  --required-secret MY_DB_DSN \
+  --input-field sql=string \
+  --input-field params={kind:message,repeated:true,message:christiangeorgelucas/sql-connector.Param} \
+  --input-field max_rows=int32 \
+  --map connection.dsn_secret_name="'MY_DB_DSN'"
+```
+
+Repeat for each node you need (Ping, ListTables, DescribeTable,
+ExecuteTransaction, StreamQueryRows), and see the
+[axiom-instance-authoring guide](https://axiomide.com) for the full
+`axiom instance create` reference — including `--from` batch manifests for
+binding several nodes to the same database at once, and `axiom instance
+preview` for checking a mapping before you commit to it.
+
+## Get started free
+
+Install the CLI:
+
+```bash
+# macOS / Linux — Homebrew
+brew install axiomide/tap/axiom
+
+# macOS / Linux — install script
+curl -fsSL https://raw.githubusercontent.com/AxiomIDE/axiom-releases/main/install.sh | sh
+```
+
+**Windows:** download the `windows/amd64` `.zip` from the
+[releases page](https://github.com/AxiomIDE/axiom-releases/releases), unzip
+it, and put `axiom.exe` on your `PATH`.
+
+Then `axiom version` to verify, `axiom login` (GitHub or Google) to
+authenticate, and create an API key under **Console → API Keys**. Docs and
+sign-up at **[axiomide.com](https://axiomide.com)**.
 
 ## Idempotency
 

@@ -21,37 +21,39 @@ package christiangeorgelucas.sql_connector;
 
 option go_package = ".;gen";
 
-// How to reach the target database. The DSN's URL scheme selects the
-// engine: "postgres://" or "postgresql://" for PostgreSQL (via the pgx
+// How to reach the target database. THIS FIELD IS NOT SET BY END CALLERS —
+// it is a GENERIC port: whoever binds this template to a real database via
+// `axiom instance create` pins it once, either as a literal DSN constant
+// (appropriate for a public, non-sensitive database) or, for a private
+// database, by declaring the secret's name in the Instance's own
+// required_secrets and pinning dsn_secret_name to that same name — that is
+// the mechanism that actually delivers a secret here (a bare, undeclared,
+// caller-chosen secret name does NOT get delivered; see the package
+// description for why this template has no connection input of its own).
+// Once bound, an Instance's own callers see only the query-shaped fields
+// (sql, params, etc.) — never this message. The DSN's URL scheme selects
+// the engine: "postgres://" or "postgresql://" for PostgreSQL (via the pgx
 // driver), "mysql://" for MySQL (via go-mysql-org/go-mysql). Any other
-// scheme is a structured error. Two ways to supply the DSN — set exactly
-// one (see the known limitation on dsn_secret_name below before choosing):
+// scheme is a structured error. Set exactly one of the two fields below:
 message ConnectionConfig {
-  // NOT YET DELIVERABLE (known platform limitation, 2026-08-03) — set `dsn`
-  // instead until this is resolved. This field's design is otherwise sound
-  // (a tenant-secret NAME resolved via ax.Secrets().Get() at invocation
-  // time, so this message/the flow manifest/this connector's own error
-  // messages never carry the DSN's password), but this package declares no
-  // required_secrets (by design — the whole point is any caller can name
-  // any of their own secrets, not one fixed name declared by the package
-  // author), and the platform only delivers a secret whose name is declared
-  // in required_secrets — neither a direct invoke nor a flow's
-  // run_config.secret_refs currently forwards an undeclared, caller-chosen
-  // name to this node. Verified live: ax.Secrets().Get(name) reliably
-  // returns not-found regardless of whether the named secret is actually
-  // configured in the console. This field is kept in the schema because the
-  // design is forward-compatible with a future secret-grants model that
-  // closes this gap — not because it works today. Takes precedence over
-  // `dsn` when both are set (once deliverable).
+  // Name of the Instance-declared tenant secret holding the full connection
+  // DSN, e.g. "postgres://user:pass@host:5432/dbname" or
+  // "mysql://user:pass@host:3306/dbname". Resolved via ax.Secrets().Get()
+  // at invocation time — this message, the flow manifest, and this
+  // connector's own error messages never carry the DSN's password (a
+  // connection failure's error text may still echo non-secret fragments
+  // the database driver itself includes, such as the DSN's username or
+  // host — never the password). Only deliverable when the binding Instance
+  // declares this exact name in its own required_secrets — see the message
+  // comment above. Takes precedence over `dsn` when both are set.
   string dsn_secret_name = 1;
-  // THE WORKING PATH TODAY. Raw connection DSN. WARNING: a value placed
-  // here is visible in flow definitions, execution history, and logs — this
-  // is NOT a secret-safe channel. Use ONLY for publicly-documented or
-  // throwaway credentials (e.g. a published read-only public database's
-  // DSN) — dsn_secret_name is the intended home for a real credential, but
-  // see the known limitation above: until it's deliverable, this is the
-  // only field that actually works. Leaving BOTH fields empty is a
-  // structured error, not a crash.
+  // A literal connection DSN, pinned by the binding Instance as an adapter
+  // constant rather than resolved from a secret. Appropriate ONLY for a
+  // publicly-documented or throwaway credential (e.g. a published
+  // read-only public database) — an Instance's config (including this
+  // pinned value) is visible in the Instance's own definition, so a real
+  // credential belongs in dsn_secret_name instead. Leaving BOTH fields
+  // empty is a structured error, not a crash.
   string dsn = 2;
 }
 

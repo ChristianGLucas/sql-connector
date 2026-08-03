@@ -2,83 +2,113 @@ name: christiangeorgelucas/sql-connector
 version: 0.1.1
 language: go
 description: >-
-  Generic SQL execution against live PostgreSQL and MySQL databases via a
-  bring-your-own DSN — a raw DSN field (publicly-documented/throwaway
-  credentials; the only currently-working connection path — see
-  ConnectionConfig's doc) or a named tenant secret (the intended design for
-  real credentials, not yet deliverable pending a platform secret-grants
-  model) — the STATE pillar for agents that query and write their own databases.
-  Parameterized query/execute/transaction/introspection nodes (unary) plus a
-  true streaming row-cursor node (pipeline) for unbounded result sets. Boundary:
-  this package EXECUTES against live databases; it does not parse or transpile
-  SQL text — see christiangeorgelucas/sql-tools for that.
+  Generic SQL execution template for PostgreSQL and MySQL — the STATE pillar
+  for agents that query and write databases. This package is NOT directly
+  invocable: it publishes a generalized (kind: generic) node template per
+  operation, and a consumer binds one to a real database as a reusable
+  Instance (one per database/credential) via `axiom instance create`. An
+  Instance pins the connection (a literal DSN for a public database, or an
+  instance-declared tenant secret for a private one) so its own callers never
+  see connection details at all — only the query-shaped fields (sql, params,
+  etc). Parameterized query/execute/transaction/introspection templates
+  (unary) plus a true streaming row-cursor template (pipeline) for unbounded
+  result sets. Boundary: this package EXECUTES against live databases; it
+  does not parse or transpile SQL text — see christiangeorgelucas/sql-tools
+  for that.
 nodes:
     - name: Query
       input: QueryRequest
       output: QueryResponse
+      kind: generic
+      generic_ports: [input, output]
       description: >-
-        Run a parameterized SELECT against PostgreSQL or MySQL and return the
-        full result: column metadata, every row (values as strings with an
-        explicit is_null flag distinguishing SQL NULL from a legitimate empty
-        string), a row_count, and a truncated flag when max_rows capped the
-        result. Use StreamQueryRows instead when the result set may be large —
-        Query materializes the whole result in memory before returning.
+        GENERIC TEMPLATE — bind to a real database via an Instance before
+        use (`axiom instance create --generic-package
+        christiangeorgelucas/sql-connector --generic-node Query ...`); not
+        directly invocable. Runs a parameterized SELECT against PostgreSQL
+        or MySQL and returns the full result: column metadata, every row
+        (values as strings with an explicit is_null flag distinguishing SQL
+        NULL from a legitimate empty string), a row_count, and a truncated
+        flag when max_rows capped the result. Use StreamQueryRows instead
+        when the result set may be large — Query materializes the whole
+        result in memory before returning.
     - name: Execute
       input: ExecuteRequest
       output: ExecuteResponse
+      kind: generic
+      generic_ports: [input, output]
       description: >-
-        Run a single parameterized INSERT/UPDATE/DELETE/DDL statement against
-        PostgreSQL or MySQL and return rows_affected plus, when the engine
-        supports it, the last-inserted auto-increment ID. At-least-once node
-        invocation means a retried delivery can re-execute this statement —
-        prefer idempotent statements (upserts, unique-key conflict handling)
-        or de-duplicate downstream; see the field docs for detail.
+        GENERIC TEMPLATE — bind to a real database via an Instance before
+        use; not directly invocable. Runs a single parameterized INSERT/
+        UPDATE/DELETE/DDL statement against PostgreSQL or MySQL and returns
+        rows_affected plus, when the engine supports it, the last-inserted
+        auto-increment ID. At-least-once node invocation means a retried
+        delivery can re-execute this statement — prefer idempotent
+        statements (upserts, unique-key conflict handling) or de-duplicate
+        downstream; see the field docs for detail.
     - name: ExecuteTransaction
       input: ExecuteTransactionRequest
       output: ExecuteTransactionResponse
+      kind: generic
+      generic_ports: [input, output]
       description: >-
-        Run multiple parameterized statements as one all-or-nothing
-        transaction on a single connection — the atomicity story for
-        multi-statement CRUD within one database. There is no cross-node
-        transaction on this platform: if you need atomicity across separate
-        node invocations, express the whole unit of work as one
-        ExecuteTransaction call instead. On any statement failure the entire
-        transaction rolls back and the response reports the failing
-        statement's index and error. Same at-least-once idempotency hazard as
-        Execute, applied to the whole transaction.
+        GENERIC TEMPLATE — bind to a real database via an Instance before
+        use; not directly invocable. Runs multiple parameterized statements
+        as one all-or-nothing transaction on a single connection — the
+        atomicity story for multi-statement CRUD within one database. There
+        is no cross-node transaction on this platform: if you need
+        atomicity across separate node invocations, express the whole unit
+        of work as one ExecuteTransaction call instead. On any statement
+        failure the entire transaction rolls back and the response reports
+        the failing statement's index and error. Same at-least-once
+        idempotency hazard as Execute, applied to the whole transaction.
     - name: Ping
       input: PingRequest
       output: PingResponse
+      kind: generic
+      generic_ports: [input, output]
       description: >-
-        Check connectivity to a PostgreSQL or MySQL database and read back its
-        engine and version string. Returns a structured error (never a
-        response with zero-valued fields) on an unreachable host, auth
-        failure, or timeout, within a bounded connect timeout — it never
-        hangs indefinitely.
+        GENERIC TEMPLATE — bind to a real database via an Instance before
+        use; not directly invocable. Checks connectivity to a PostgreSQL or
+        MySQL database and reads back its engine and version string.
+        Returns a structured error (never a response with zero-valued
+        fields) on an unreachable host, auth failure, or timeout, within a
+        bounded connect timeout — it never hangs indefinitely.
     - name: ListTables
       input: ListTablesRequest
       output: ListTablesResponse
+      kind: generic
+      generic_ports: [input, output]
       description: >-
-        List tables and views visible to the connection via
-        information_schema, so the same request shape works identically on
-        PostgreSQL and MySQL. Lets an agent discover what it can query before
-        writing SQL against it.
+        GENERIC TEMPLATE — bind to a real database via an Instance before
+        use; not directly invocable. Lists tables and views visible to the
+        connection via information_schema, so the same request shape works
+        identically on PostgreSQL and MySQL. Lets an agent discover what it
+        can query before writing SQL against it.
     - name: DescribeTable
       input: DescribeTableRequest
       output: DescribeTableResponse
+      kind: generic
+      generic_ports: [input, output]
       description: >-
-        Describe one table's columns — name, native database type,
-        nullability, primary-key membership, default value, and ordinal
-        position — via information_schema, schema-qualified so an agent can
-        write a correct query without guessing types.
+        GENERIC TEMPLATE — bind to a real database via an Instance before
+        use; not directly invocable. Describes one table's columns — name,
+        native database type, nullability, primary-key membership, default
+        value, and ordinal position — via information_schema, schema-
+        qualified so an agent can write a correct query without guessing
+        types.
     - name: StreamQueryRows
       input: StreamQueryRowsRequest
       output: QueryRowFrame
       type: pipeline
+      kind: generic
+      generic_ports: [input, output]
       description: >-
-        Run a parameterized SELECT and stream results one row per frame using
-        a real server-side cursor — the full result set is never materialized
-        in memory, making this the right choice for tables too large to
-        return from Query. Each frame carries column metadata, one row, its
-        0-based row_index, and is_final (true only on the last frame emitted;
-        a zero-row result emits no frames at all).
+        GENERIC TEMPLATE — bind to a real database via an Instance before
+        use; not directly invocable. Runs a parameterized SELECT and
+        streams results one row per frame using a real server-side cursor —
+        the full result set is never materialized in memory, making this
+        the right choice for tables too large to return from Query. Each
+        frame carries column metadata, one row, its 0-based row_index, and
+        is_final (true only on the last frame emitted; a zero-row result
+        emits no frames at all).
