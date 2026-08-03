@@ -141,6 +141,24 @@ func TestIntegration_SelectViaExecute_DMLViaQuery(t *testing.T) {
 	})
 }
 
+// TestIntegration_RawDSNField proves connection.dsn (the raw, non-secret
+// path) actually works end-to-end against a real database — not just the
+// precedence logic (covered by the pure-function TestResolveDSN_Precedence
+// unit test).
+func TestIntegration_RawDSNField(t *testing.T) {
+	ax := newTestContext(t) // no secretsMap entries — proves the secret is genuinely not needed
+	got, err := nodes.Query(context.Background(), ax, &gen.QueryRequest{
+		Connection: &gen.ConnectionConfig{Dsn: pgDSN},
+		Sql:        "SELECT count(*) FROM users",
+	})
+	if err != nil {
+		t.Fatalf("Query via raw dsn: %v", err)
+	}
+	if got.GetRowCount() != 1 || got.GetRows()[0].GetValues()[0].GetIsNull() {
+		t.Errorf("Query via raw dsn: expected a real count, got %+v", got)
+	}
+}
+
 func TestIntegration_Query_NullVsZeroRoundTrip_Postgres(t *testing.T) {
 	testQueryNullVsZeroRoundTrip(t, pgDSN, "postgres")
 }

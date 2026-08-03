@@ -52,19 +52,34 @@ func engineForDSN(dsn string) (driverName, engine string, err error) {
 	}
 }
 
-// openConnection resolves the connection's named secret to a DSN, opens a
-// FRESH *sql.DB for this invocation, and validates reachability with a
-// bounded timeout. Nodes are stateless — no connection pool is kept across
-// invocations, so the caller must db.Close() when done (every node does,
-// via defer, immediately after this returns successfully).
-func openConnection(ctx context.Context, ax axiom.Context, cfg *gen.ConnectionConfig) (*sql.DB, string, error) {
+// resolveDSN implements ConnectionConfig's two-way precedence: a named
+// secret (recommended, for any real credential) wins over the raw `dsn`
+// field (publicly-documented/throwaway credentials only) when both are set;
+// leaving both empty is a structured error.
+func resolveDSN(ax axiom.Context, cfg *gen.ConnectionConfig) (string, error) {
 	name := strings.TrimSpace(cfg.GetDsnSecretName())
-	if name == "" {
-		return nil, "", fmt.Errorf("connection.dsn_secret_name is required")
+	if name != "" {
+		dsn, ok := ax.Secrets().Get(name)
+		if !ok {
+			return "", fmt.Errorf("required secret %q is not configured", name)
+		}
+		return dsn, nil
 	}
-	dsn, ok := ax.Secrets().Get(name)
-	if !ok {
-		return nil, "", fmt.Errorf("required secret %q is not configured", name)
+	if raw := strings.TrimSpace(cfg.GetDsn()); raw != "" {
+		return raw, nil
+	}
+	return "", fmt.Errorf("connection.dsn_secret_name or connection.dsn is required")
+}
+
+// openConnection resolves the connection's DSN (secret or raw, see
+// resolveDSN), opens a FRESH *sql.DB for this invocation, and validates
+// reachability with a bounded timeout. Nodes are stateless — no connection
+// pool is kept across invocations, so the caller must db.Close() when done
+// (every node does, via defer, immediately after this returns successfully).
+func openConnection(ctx context.Context, ax axiom.Context, cfg *gen.ConnectionConfig) (*sql.DB, string, error) {
+	dsn, err := resolveDSN(ax, cfg)
+	if err != nil {
+		return nil, "", err
 	}
 	driverName, engine, err := engineForDSN(dsn)
 	if err != nil {

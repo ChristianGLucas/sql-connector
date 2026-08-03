@@ -5,8 +5,56 @@ import (
 	"testing"
 	"time"
 
+	"christiangeorgelucas/sql-connector/axiom"
 	gen "christiangeorgelucas/sql-connector/gen"
 )
+
+// fakeSecrets is a minimal axiom.Secrets for resolveDSN's internal tests —
+// this file is `package nodes` (needs unexported resolveDSN), so it can't
+// reuse nodes_test's testContext fake from helpers_test.go.
+type fakeSecrets map[string]string
+
+func (s fakeSecrets) Get(name string) (string, bool) { v, ok := s[name]; return v, ok }
+
+// fakeContext implements only the axiom.Context methods resolveDSN touches.
+type fakeContext struct{ secrets fakeSecrets }
+
+func (c fakeContext) Log() axiom.Logger            { return nil }
+func (c fakeContext) Secrets() axiom.Secrets       { return c.secrets }
+func (c fakeContext) ExecutionID() string          { return "" }
+func (c fakeContext) FlowID() string               { return "" }
+func (c fakeContext) TenantID() string             { return "" }
+func (c fakeContext) Reflection() axiom.Reflection { return nil }
+func (c fakeContext) Mutation() axiom.Mutation     { return nil }
+
+// TestResolveDSN_Precedence is the independent oracle for the dual-mode
+// connection input: a named secret wins over the raw dsn field when both
+// are set; the raw field works alone; an unconfigured secret name is a
+// structured error (never silently falls back to the raw field); leaving
+// both empty is a structured error.
+func TestResolveDSN_Precedence(t *testing.T) {
+	ax := fakeContext{secrets: fakeSecrets{"DB": "postgres://from-secret/db"}}
+
+	dsn, err := resolveDSN(ax, &gen.ConnectionConfig{DsnSecretName: "DB", Dsn: "postgres://from-raw/db"})
+	if err != nil || dsn != "postgres://from-secret/db" {
+		t.Errorf("both set: got (%q, %v), want the SECRET value to win", dsn, err)
+	}
+
+	dsn, err = resolveDSN(ax, &gen.ConnectionConfig{Dsn: "postgres://from-raw/db"})
+	if err != nil || dsn != "postgres://from-raw/db" {
+		t.Errorf("raw only: got (%q, %v), want the raw dsn to be used", dsn, err)
+	}
+
+	_, err = resolveDSN(ax, &gen.ConnectionConfig{DsnSecretName: "NEVER_CONFIGURED", Dsn: "postgres://from-raw/db"})
+	if err == nil {
+		t.Error("unconfigured secret name with a raw dsn ALSO set: expected an error, not a silent fallback to dsn")
+	}
+
+	_, err = resolveDSN(ax, &gen.ConnectionConfig{})
+	if err == nil {
+		t.Error("both empty: expected an error, got nil")
+	}
+}
 
 // TestEngineForDSN_ScemeRouting is the independent oracle for engine
 // selection: given a DSN scheme, hand-computed expected (driver, engine)

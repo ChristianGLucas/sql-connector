@@ -82,20 +82,27 @@ sign-up at **[axiomide.com](https://axiomide.com)**.
 
 ## Connecting to your database
 
-Set a tenant secret under **Console → Secrets** holding your full connection
-string, then reference its NAME (never the value) via
-`connection.dsn_secret_name` on every node. The DSN's scheme selects the
-engine:
+Every node takes a `connection` with two ways to supply the DSN — set exactly
+one:
+
+- **`connection.dsn_secret_name`** (recommended for any real credential). Set
+  a tenant secret under **Console → Secrets** holding your full connection
+  string, then reference its NAME (never the value). Resolved server-side at
+  invocation time, mirroring http-tools' `auth_secret_name` convention — this
+  keeps real credentials out of flow manifests, logs, and node inputs
+  entirely.
+- **`connection.dsn`** — a raw DSN, for publicly-documented or throwaway
+  credentials only (e.g. a published read-only public database). A value
+  placed here is visible in flow definitions and execution history — do
+  **not** put a real credential in this field. When both are set, the secret
+  wins.
+
+The DSN's scheme selects the engine either way:
 
 - `postgres://user:pass@host:5432/dbname` or `postgresql://...` → PostgreSQL
   (via [pgx](https://github.com/jackc/pgx))
 - `mysql://user:pass@host:3306/dbname` → MySQL
   (via [go-mysql-org/go-mysql](https://github.com/go-mysql-org/go-mysql))
-
-The raw DSN is never accepted as a plain input field — only as a named secret,
-resolved server-side at invocation time, mirroring http-tools'
-`auth_secret_name` convention. This keeps credentials out of flow manifests,
-logs, and node inputs entirely.
 
 ## Nodes
 

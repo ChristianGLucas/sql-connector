@@ -21,20 +21,27 @@ package christiangeorgelucas.sql_connector;
 
 option go_package = ".;gen";
 
-// How to reach the target database. The connector NEVER accepts a raw DSN
-// string field — credentials only ever travel as a named tenant secret,
-// resolved server-side at invocation time (mirrors http-tools' auth_secret_name
-// convention). The DSN's URL scheme selects the engine: "postgres://" or
-// "postgresql://" for PostgreSQL (via the pgx driver), "mysql://" for MySQL
-// (via go-sql-driver/mysql). Any other scheme is a structured error.
+// How to reach the target database. The DSN's URL scheme selects the
+// engine: "postgres://" or "postgresql://" for PostgreSQL (via the pgx
+// driver), "mysql://" for MySQL (via go-mysql-org/go-mysql). Any other
+// scheme is a structured error. Two ways to supply the DSN, checked in this
+// order — set exactly one:
 message ConnectionConfig {
-  // Name of the tenant secret holding the full connection DSN, e.g.
-  // "postgres://user:pass@host:5432/dbname" or
+  // RECOMMENDED for any real credential. Name of the tenant secret holding
+  // the full connection DSN, e.g. "postgres://user:pass@host:5432/dbname" or
   // "mysql://user:pass@host:3306/dbname". Resolved via ax.Secrets().Get() at
   // invocation time — the DSN value itself never appears in this message, in
-  // any log, or in the flow manifest. Required; a missing or unconfigured
-  // secret name is a structured error, not a crash.
+  // any log, or in the flow manifest. Takes precedence over `dsn` when both
+  // are set.
   string dsn_secret_name = 1;
+  // Raw connection DSN, as an alternative to dsn_secret_name. WARNING: a
+  // value placed here is visible in flow definitions, execution history, and
+  // logs — this is NOT a secret-safe channel. Use ONLY for publicly-
+  // documented or throwaway credentials (e.g. a published read-only public
+  // database's DSN); any real credential belongs in a tenant secret via
+  // dsn_secret_name instead. Ignored when dsn_secret_name is set. Leaving
+  // BOTH fields empty is a structured error, not a crash.
+  string dsn = 2;
 }
 
 // How to interpret a parameter's string value when binding it to a

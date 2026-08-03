@@ -30,7 +30,7 @@ func TestQuery_MissingDsnSecretName(t *testing.T) {
 		Sql:        "SELECT 1",
 	}
 	_, err := nodes.Query(context.Background(), ax, input)
-	if err == nil || !strings.Contains(err.Error(), "dsn_secret_name is required") {
+	if err == nil || !strings.Contains(err.Error(), "dsn_secret_name or connection.dsn is required") {
 		t.Fatalf("expected a dsn_secret_name-required error, got %v", err)
 	}
 }
