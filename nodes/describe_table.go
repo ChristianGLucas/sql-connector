@@ -12,20 +12,28 @@ import (
 
 // postgresDescribeQuery lists a table's columns with type, nullability,
 // default, and primary-key membership in one pass, ordered by position.
+//
+// Primary-key membership is resolved via pg_catalog (pg_index/pg_attribute)
+// rather than information_schema.table_constraints: Postgres restricts
+// table_constraints to users who own the table or hold a privilege OTHER
+// THAN SELECT on it — a SELECT-only role (the common case for a read-only
+// public database Instance) gets zero rows from that view for every table,
+// which silently reported every column's primary_key as false regardless of
+// the table's real key. pg_catalog's index metadata has no such privilege
+// restriction — describing a table's structure only requires being able to
+// see that the table exists, which SELECT already grants.
 const postgresDescribeQuery = `
 SELECT c.column_name, c.data_type, c.is_nullable, c.column_default, c.ordinal_position,
-       (pk.column_name IS NOT NULL) AS is_primary_key
+       (pk.attname IS NOT NULL) AS is_primary_key
 FROM information_schema.columns c
 LEFT JOIN (
-  SELECT kcu.column_name
-  FROM information_schema.key_column_usage kcu
-  JOIN information_schema.table_constraints tc
-    ON tc.constraint_name = kcu.constraint_name
-   AND tc.table_schema = kcu.table_schema
-   AND tc.table_name = kcu.table_name
-  WHERE tc.constraint_type = 'PRIMARY KEY'
-    AND kcu.table_schema = $1 AND kcu.table_name = $2
-) pk ON pk.column_name = c.column_name
+  SELECT a.attname
+  FROM pg_catalog.pg_index i
+  JOIN pg_catalog.pg_class t ON t.oid = i.indrelid
+  JOIN pg_catalog.pg_namespace n ON n.oid = t.relnamespace
+  JOIN pg_catalog.pg_attribute a ON a.attrelid = t.oid AND a.attnum = ANY(i.indkey)
+  WHERE i.indisprimary AND n.nspname = $1 AND t.relname = $2
+) pk ON pk.attname = c.column_name
 WHERE c.table_schema = $1 AND c.table_name = $2
 ORDER BY c.ordinal_position`
 

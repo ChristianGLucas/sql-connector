@@ -353,6 +353,46 @@ func TestIntegration_ListTables_And_DescribeTable(t *testing.T) {
 	}
 }
 
+// TestIntegration_DescribeTable_PrimaryKey_UnderSelectOnlyPrivilege is a
+// regression test for a bug where primary_key was silently false for every
+// column when the connecting role holds ONLY SELECT on the table (the
+// common case for a read-only public-database Instance, e.g. RNAcentral's
+// "reader" credential). Postgres restricts information_schema.
+// table_constraints to a table's owner or a role holding a privilege OTHER
+// THAN SELECT — a SELECT-only role gets zero rows from that view for every
+// table. The fixture below grants readonly_probe/mysql readonly_probe
+// SELECT-only on `users` (created out-of-band by the test setup docs, see
+// RETRO-NOTES.md) to exercise exactly that path against the real driver.
+func TestIntegration_DescribeTable_PrimaryKey_UnderSelectOnlyPrivilege(t *testing.T) {
+	for _, tc := range []struct {
+		engine, dsn, schema string
+	}{
+		{"postgres", "postgres://readonly_probe:readonly_probe@localhost:15432/testdb?sslmode=disable", "public"},
+		{"mysql", "mysql://readonly_probe:readonly_probe@localhost:13306/testdb", "testdb"},
+	} {
+		t.Run(tc.engine, func(t *testing.T) {
+			ax := newTestContext(t)
+			ax.secretsMap["DB"] = tc.dsn
+
+			dt, err := nodes.DescribeTable(context.Background(), ax, &gen.DescribeTableRequest{
+				Connection: &gen.ConnectionConfig{DsnSecretName: "DB"}, Table: "users",
+			})
+			if err != nil {
+				t.Fatalf("DescribeTable: %v", err)
+			}
+			var idCol *gen.ColumnInfo
+			for _, c := range dt.GetColumns() {
+				if c.GetName() == "id" {
+					idCol = c
+				}
+			}
+			if idCol == nil || !idCol.GetPrimaryKey() {
+				t.Errorf("DescribeTable under a SELECT-only credential: expected id to be primary_key=true, got %+v", idCol)
+			}
+		})
+	}
+}
+
 func TestIntegration_StreamQueryRows_5000Rows_NoFullMaterialization(t *testing.T) {
 	ax := newTestContext(t)
 	ax.secretsMap["DB"] = pgDSN
