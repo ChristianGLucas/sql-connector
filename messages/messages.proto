@@ -30,9 +30,11 @@ message ConnectionConfig {
   // RECOMMENDED for any real credential. Name of the tenant secret holding
   // the full connection DSN, e.g. "postgres://user:pass@host:5432/dbname" or
   // "mysql://user:pass@host:3306/dbname". Resolved via ax.Secrets().Get() at
-  // invocation time — the DSN value itself never appears in this message, in
-  // any log, or in the flow manifest. Takes precedence over `dsn` when both
-  // are set.
+  // invocation time — this message, the flow manifest, and this connector's
+  // own error messages never carry the DSN's password. (A connection
+  // failure's error text may still echo non-secret fragments the database
+  // driver itself includes, such as the DSN's username or host — never the
+  // password.) Takes precedence over `dsn` when both are set.
   string dsn_secret_name = 1;
   // Raw connection DSN, as an alternative to dsn_secret_name. WARNING: a
   // value placed here is visible in flow definitions, execution history, and

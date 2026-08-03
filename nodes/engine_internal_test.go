@@ -2,6 +2,7 @@ package nodes
 
 import (
 	"database/sql"
+	"strings"
 	"testing"
 	"time"
 
@@ -53,6 +54,31 @@ func TestResolveDSN_Precedence(t *testing.T) {
 	_, err = resolveDSN(ax, &gen.ConnectionConfig{})
 	if err == nil {
 		t.Error("both empty: expected an error, got nil")
+	}
+
+	_, err = resolveDSN(ax, &gen.ConnectionConfig{DsnSecretName: "   ", Dsn: "   "})
+	if err == nil {
+		t.Error("both whitespace-only: expected an error (both trimmed to empty), got nil")
+	}
+
+	dsn, err = resolveDSN(ax, &gen.ConnectionConfig{DsnSecretName: "  DB  "})
+	if err != nil || dsn != "postgres://from-secret/db" {
+		t.Errorf("whitespace-padded secret name: got (%q, %v), want the trimmed name to still resolve", dsn, err)
+	}
+
+	dsn, err = resolveDSN(ax, &gen.ConnectionConfig{Dsn: "  postgres://from-raw/db  "})
+	if err != nil || dsn != "postgres://from-raw/db" {
+		t.Errorf("whitespace-padded raw dsn: got (%q, %v), want it trimmed", dsn, err)
+	}
+
+	// An empty-string secret VALUE (Get returns ok=true, value="") must be
+	// treated the same as "not configured" — a clear error naming the
+	// secret, not a silent success with an empty DSN that fails confusingly
+	// downstream.
+	axEmpty := fakeContext{secrets: fakeSecrets{"EMPTY": ""}}
+	_, err = resolveDSN(axEmpty, &gen.ConnectionConfig{DsnSecretName: "EMPTY"})
+	if err == nil {
+		t.Error("secret resolves to an empty string: expected a not-configured error, got nil")
 	}
 }
 
@@ -174,7 +200,7 @@ func TestBindParams_IndexedError(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected an error for the malformed second param, got nil")
 	}
-	if got := err.Error(); !contains(got, "params[1]") {
+	if got := err.Error(); !strings.Contains(got, "params[1]") {
 		t.Errorf("error %q does not name the failing index params[1]", got)
 	}
 }
@@ -288,17 +314,4 @@ func TestColumnInfoFromRow_HasDefaultVsEmptyDefault(t *testing.T) {
 	if !emptyStringDefault.GetNullable() {
 		t.Error("is_nullable=\"YES\" must map to Nullable=true")
 	}
-}
-
-func contains(s, substr string) bool {
-	return len(s) >= len(substr) && (s == substr || (len(substr) > 0 && indexOf(s, substr) >= 0))
-}
-
-func indexOf(s, substr string) int {
-	for i := 0; i+len(substr) <= len(s); i++ {
-		if s[i:i+len(substr)] == substr {
-			return i
-		}
-	}
-	return -1
 }

@@ -126,7 +126,11 @@ The DSN's scheme selects the engine either way:
 - **StreamQueryRows** — parameterized SELECT streamed one row per frame using
   a real server-side cursor. The full result set is never materialized in
   memory, making this the right choice for tables too large to return from
-  `Query`.
+  `Query`. `is_final` (true only on the last frame) is the business-level
+  completion signal; a zero-row result emits no frames at all, and stream
+  completion in that case is signaled the same way any pipeline node signals
+  it — Axiom's own transport-level stream close (SSE terminal event / gRPC
+  stream end), independent of any node payload.
 
 Parameterization is mandatory everywhere: every value binds through the
 target engine's native placeholder syntax (`$1, $2, ...` for PostgreSQL, `?`

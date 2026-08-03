@@ -40,7 +40,12 @@ const queryTimeout = 30 * time.Second
 func engineForDSN(dsn string) (driverName, engine string, err error) {
 	u, err := url.Parse(dsn)
 	if err != nil {
-		return "", "", fmt.Errorf("invalid connection DSN: %w", err)
+		// Deliberately NOT wrapping the underlying url.Parse error: its
+		// message embeds the offending input VERBATIM (Go's url.Error
+		// formats as `parse "<input>": <reason>`), which would leak a
+		// secret-sourced DSN — credentials and all — into this node's
+		// returned error, and from there into logs/execution history.
+		return "", "", fmt.Errorf("invalid connection DSN: malformed URL")
 	}
 	switch strings.ToLower(u.Scheme) {
 	case "postgres", "postgresql":
@@ -60,7 +65,10 @@ func resolveDSN(ax axiom.Context, cfg *gen.ConnectionConfig) (string, error) {
 	name := strings.TrimSpace(cfg.GetDsnSecretName())
 	if name != "" {
 		dsn, ok := ax.Secrets().Get(name)
-		if !ok {
+		// An empty resolved value is treated the same as "not configured" —
+		// a clear, actionable error naming the secret, rather than falling
+		// through into an opaque "unsupported DSN scheme" from downstream.
+		if !ok || dsn == "" {
 			return "", fmt.Errorf("required secret %q is not configured", name)
 		}
 		return dsn, nil
