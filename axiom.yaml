@@ -1,5 +1,5 @@
 name: christiangeorgelucas/sql-connector
-version: 0.1.0
+version: 0.1.1
 language: go
 description: >-
   Generic SQL execution against live PostgreSQL and MySQL databases via a
