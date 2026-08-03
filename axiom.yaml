@@ -1,5 +1,5 @@
 name: christiangeorgelucas/sql-connector
-version: 0.1.1
+version: 0.1.2
 language: go
 description: >-
   Generic SQL execution template for PostgreSQL and MySQL — the STATE pillar
